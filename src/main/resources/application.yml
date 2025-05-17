@@ -1,0 +1,65 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: workflow-management-system
+  
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/XEPDB1
+    username: workflow_user
+    password: workflow_password
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 30000
+  
+  redis:
+    host: localhost
+    port: 6379
+    password:
+    timeout: 2000
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        max-wait: -1
+      shutdown-timeout: 100ms
+
+# Redisson-specific config
+redisson:
+  threads: 16
+  netty-threads: 32
+  transport-mode: NIO
+  codec: org.redisson.codec.JsonJacksonCodec
+
+
+workflow:
+  workflowsFolder: config/workflows
+  
+  cache:
+    ttl: 3600
+    workflows-ttl: 86400
+    execution-ttl: 1800
+    eviction-policy: LRU
+  
+  execution:
+    max-concurrent-workflows: 10
+    max-concurrent-tasks-per-workflow: 5
+    timeout-seconds: 3600
+    retry-attempts: 3
+    retry-delay-seconds: 60
+  
+  scheduler:
+    poll-interval-seconds: 60
+    allow-missed-executions: true
+    missed-execution-threshold-minutes: 60
+
+logging:
+  level:
+    root: INFO
+    com.workflow: DEBUG
+    org.springframework.cache: INFO
+    org.springframework.data.redis: INFO

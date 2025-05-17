@@ -1,0 +1,100 @@
+{
+  "workflow": {
+    "workflowId": "sample-workflow-001",
+    "name": "Sample Data Processing Workflow",
+    "description": "A sample workflow that processes data from an API and stores results",
+    "parameters": {
+      "apiEndpoint": "https://api.example.com/data",
+      "processInterval": "daily"
+    },
+    "protectedParameters": ["apiEndpoint"],
+    "schedule": "0 0 * * *"
+  },
+  "tasks": [
+    {
+      "taskId": "fetch-data-001",
+      "workflowId": "sample-workflow-001",
+      "name": "Fetch Data",
+      "description": "Fetches data from external API",
+      "inputParameters": {
+        "type": "rest",
+        "url": "${workflow.parameters.apiEndpoint}",
+        "method": "GET",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer ${env.API_TOKEN}"
+        }
+      },
+      "failWorkflowOnError": true,
+      "forceExecution": false
+    },
+    {
+      "taskId": "transform-data-001",
+      "workflowId": "sample-workflow-001",
+      "name": "Transform Data",
+      "description": "Transforms the fetched data",
+      "inputParameters": {
+        "type": "transform",
+        "sourceTaskId": "fetch-data-001",
+        "transformations": [
+          {
+            "operation": "filter",
+            "field": "status",
+            "value": "active"
+          },
+          {
+            "operation": "map",
+            "field": "name",
+            "targetField": "fullName"
+          }
+        ]
+      },
+      "preconditions": [
+        "${task.fetch-data-001.status == 'SUCCESS'}"
+      ],
+      "failWorkflowOnError": true,
+      "forceExecution": false
+    },
+    {
+      "taskId": "store-data-001",
+      "workflowId": "sample-workflow-001",
+      "name": "Store Data",
+      "description": "Stores the transformed data",
+      "inputParameters": {
+        "type": "rest",
+        "url": "https://storage.example.com/data",
+        "method": "POST",
+        "body": "${task.transform-data-001.output}",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer ${env.STORAGE_TOKEN}"
+        }
+      },
+      "preconditions": [
+        "${task.transform-data-001.status == 'SUCCESS'}"
+      ],
+      "failWorkflowOnError": true,
+      "forceExecution": false
+    },
+    {
+      "taskId": "notify-completion-001",
+      "workflowId": "sample-workflow-001",
+      "name": "Send Completion Notification",
+      "description": "Sends notification when workflow completes",
+      "inputParameters": {
+        "type": "rest",
+        "url": "https://notifications.example.com/send",
+        "method": "POST",
+        "body": {
+          "workflowId": "${workflow.workflowId}",
+          "status": "${workflow.status}",
+          "completedAt": "${workflow.endTime}"
+        },
+        "async": "true"
+      },
+      "preconditions": [],
+      "failWorkflowOnError": false,
+      "forceExecution": true
+    }
+  ]
+}
