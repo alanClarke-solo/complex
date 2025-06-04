@@ -7,6 +7,7 @@ import org.springframework.data.relational.core.mapping.Table;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.List;
+import java.util.function.Predicate;
 
 @Data
 @Table("TASKS")
@@ -18,7 +19,7 @@ public class Task {
     private String description;
     private Map<String, Object> inputParameters;
     private Map<String, Object> outputParameters;
-    private List<String> preconditions;
+    private List<Predicate<Object>> preconditions;
     private Boolean failWorkflowOnError;
     private Boolean forceExecution;
     private String schedule;

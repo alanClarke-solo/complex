@@ -8,5 +8,11 @@ import java.util.List;
 
 @Repository
 public interface TaskRepository extends CrudRepository<Task, String> {
+    /**
+     * Find tasks by workflow ID.
+     *
+     * @param workflowId the workflow ID
+     * @return the list of tasks
+     */
     List<Task> findByWorkflowId(String workflowId);
 }

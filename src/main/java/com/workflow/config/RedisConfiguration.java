@@ -1,3 +1,4 @@
+/*
 package com.workflow.config;
 
 import com.workflow.util.Receiver;
@@ -117,4 +118,4 @@ public class RedisConfiguration {
 
         System.exit(0);
     }
-}
+}*/

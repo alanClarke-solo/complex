@@ -1,5 +1,12 @@
 package com.workflow.model;
 
 public enum TaskStatus {
-    PENDING, STARTING, RUNNING, SUCCESS, FAILURE, SKIPPED
+    STARTING,
+    PENDING,
+    RUNNING,
+    SUCCESS,
+    FAILURE,
+    SKIPPED,
+    CANCELLED,
+    TIMED_OUT
 }

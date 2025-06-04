@@ -53,7 +53,7 @@ public class EventBus {
     }
 
     public void publish(String eventType, Map<String, Object> eventData) {
-        // Add event type to the message
+        // Add an event type to the message
         eventData.put("eventType", eventType);
 
         // Publish to Redis for distributed event handling

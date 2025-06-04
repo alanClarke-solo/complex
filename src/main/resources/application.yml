@@ -7,8 +7,8 @@ spring:
   
   datasource:
     url: jdbc:oracle:thin:@//localhost:1521/XEPDB1
-    username: workflow_user
-    password: workflow_password
+    username: solo_user
+    password: solo_zpal
     driver-class-name: oracle.jdbc.OracleDriver
     hikari:
       maximum-pool-size: 10
@@ -35,6 +35,9 @@ redisson:
   transport-mode: NIO
   codec: org.redisson.codec.JsonJacksonCodec
 
+# ULID service configuration
+ulid.service.host: localhost
+ulid.service.port: 8090
 
 workflow:
   workflowsFolder: config/workflows
