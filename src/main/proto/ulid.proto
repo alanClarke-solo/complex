@@ -1,3 +1,4 @@
+/*
 
 syntax = "proto3";
 
@@ -56,4 +57,4 @@ message BatchResponse {
 
   // Time to wait before requesting another batch (in milliseconds)
   int64 wait_time_ms = 4;
-}
+}*/
