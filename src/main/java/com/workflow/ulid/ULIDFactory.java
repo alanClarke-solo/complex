@@ -1,21 +1,19 @@
-
 package com.workflow.ulid;
 
-import com.workflow.util.ULID;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.security.SecureRandom;
-import java.util.concurrent.locks.ReentrantLock;
+import java.time.Instant;
 
 /**
- * Factory for generating ULIDs with distributed service safety.
- * <p>
- * This factory provides thread-safe and node-aware ULID generation
- * to avoid collisions in distributed environments.
+ * Factory for generating ULIDs with a fixed node ID component.
+ * This class is used for local generation of ULIDs when a node ID
+ * has been assigned by the ULID service.
  */
+@Slf4j
 public class ULIDFactory {
-    private static final ReentrantLock MONOTONIC_LOCK = new ReentrantLock();
-    private static final int NODE_ID_BITS = 10; // 10 bits for node ID (max 1024 nodes)
-    private static final int MAX_NODE_ID = (1 << NODE_ID_BITS) - 1;
+
     private static final char[] ENCODING_CHARS = {
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K',
@@ -23,89 +21,145 @@ public class ULIDFactory {
             'Y', 'Z'
     };
 
+    private static final int TIMESTAMP_LEN = 10;
+    private static final int RANDOM_LEN = 16;
+    private static final int ULID_LEN = TIMESTAMP_LEN + RANDOM_LEN;
+
+    @Getter
     private final int nodeId;
-    private long lastTimestamp = -1L;
-    private byte[] lastRandomness = new byte[10]; // 80 bits = 10 bytes
-    private final SecureRandom secureRandom;
+
+    private final SecureRandom random;
+    private long lastTimestamp = -1;
+    private final byte[] lastRandomness = new byte[10];
 
     /**
-     * Creates a new ULIDFactory with the specified node ID.
+     * Creates a new ULID factory with the given node ID.
      *
      * @param nodeId the node ID (0-1023)
-     * @throws IllegalArgumentException if the node ID is invalid
+     * @throws IllegalArgumentException if the node ID is outside the valid range
      */
     public ULIDFactory(int nodeId) {
-        if (nodeId < 0 || nodeId > MAX_NODE_ID) {
-            throw new IllegalArgumentException("Node ID must be between 0 and " + MAX_NODE_ID);
+        if (nodeId < 0 || nodeId > 1023) {
+            throw new IllegalArgumentException("Node ID must be between 0 and 1023");
         }
+
         this.nodeId = nodeId;
-        this.secureRandom = new SecureRandom();
+        this.random = new SecureRandom();
     }
 
     /**
-     * Generates a standard ULID.
+     * Generate a new ULID.
      *
      * @return a new ULID as a String
      */
     public String generate() {
-        return ULID.generate();
+        long timestamp = Instant.now().toEpochMilli();
+
+        // Generate random values
+        byte[] randomness = new byte[10];
+        random.nextBytes(randomness);
+
+        // Incorporate node ID into the random component
+        incorporateNodeId(randomness, nodeId);
+
+        // Save for monotonic generation
+        System.arraycopy(randomness, 0, lastRandomness, 0, randomness.length);
+        lastTimestamp = timestamp;
+
+        return createULID(timestamp, randomness);
     }
 
     /**
-     * Generates a monotonic ULID with node ID incorporated.
-     * This method is safe for distributed systems as it includes
-     * the node ID in the random part of the ULID.
+     * Generate a monotonic ULID.
      *
      * @return a new monotonic ULID as a String
      */
     public String generateMonotonic() {
-        MONOTONIC_LOCK.lock();
-        try {
-            long timestamp = System.currentTimeMillis();
+        long timestamp = Instant.now().toEpochMilli();
 
-            // If timestamp is the same as last one, increment the random part
-            if (timestamp == lastTimestamp) {
-                incrementRandomness(lastRandomness);
-            } else {
-                // If timestamp is different, generate new random values
-                lastTimestamp = timestamp;
+        // If same timestamp as last time, increment the randomness
+        if (timestamp <= lastTimestamp) {
+            timestamp = lastTimestamp;
+            incrementRandomness(lastRandomness);
+        } else {
+            // If timestamp is different, generate new random values
+            random.nextBytes(lastRandomness);
 
-                // Generate random bytes
-                secureRandom.nextBytes(lastRandomness);
-
-                // Incorporate node ID into the first bytes of randomness
-                // This ensures different nodes generate different ULIDs even with the same timestamp
-                incorporateNodeId(lastRandomness, nodeId);
-            }
-
-            char[] ulid = new char[26]; // 10 (timestamp) + 16 (randomness)
-
-            // Encode timestamp (10 characters)
-            encodeTimestamp(timestamp, ulid, 0);
-
-            // Encode randomness (16 characters)
-            encodeBytes(lastRandomness, ulid, 10);
-
-            return new String(ulid);
-        } finally {
-            MONOTONIC_LOCK.unlock();
+            // Incorporate node ID into the random component
+            incorporateNodeId(lastRandomness, nodeId);
         }
+
+        // Update last timestamp
+        lastTimestamp = timestamp;
+
+        return createULID(timestamp, lastRandomness);
+    }
+
+    /**
+     * Create a ULID string from timestamp and randomness.
+     *
+     * @param timestamp the timestamp in milliseconds
+     * @param randomness the random bytes
+     * @return the ULID string
+     */
+    private String createULID(long timestamp, byte[] randomness) {
+        char[] ulid = new char[ULID_LEN];
+
+        // Encode timestamp (10 characters)
+        encodeTimestamp(timestamp, ulid, 0);
+
+        // Encode randomness with embedded node ID (16 characters)
+        encodeRandomness(randomness, ulid, TIMESTAMP_LEN);
+
+        return new String(ulid);
     }
 
     /**
      * Encode the timestamp part of a ULID.
      *
      * @param timestamp the timestamp in milliseconds
-     * @param ulid      the char array to encode into
-     * @param offset    the offset in the char array
+     * @param ulid the char array to encode into
+     * @param offset the offset in the char array
      */
-    private static void encodeTimestamp(long timestamp, char[] ulid, int offset) {
-        // Encode timestamp (10 characters) - 48 bits
-        for (int i = 9; i >= 0; i--) {
-            int index = (int) (timestamp & 0x1F);
-            ulid[offset + i] = ENCODING_CHARS[index];
-            timestamp >>>= 5;
+    private void encodeTimestamp(long timestamp, char[] ulid, int offset) {
+        for (int i = TIMESTAMP_LEN - 1; i >= 0; i--) {
+            int mod = (int) (timestamp % 32);
+            ulid[offset + i] = ENCODING_CHARS[mod];
+            timestamp /= 32;
         }
+    }
+
+    /**
+     * Encode the randomness part of a ULID.
+     *
+     * @param randomness the random bytes
+     * @param ulid the char array to encode into
+     * @param offset the offset in the char array
+     */
+    private void encodeRandomness(byte[] randomness, char[] ulid, int offset) {
+        // Encode each 5 bits from the randomness as a character
+        int index = 0;
+
+        // Handle the first byte specially (8 bits -> first 5 bits + 3 bits for next char)
+        ulid[offset + index++] = ENCODING_CHARS[(randomness[0] & 0xF8) >>> 3];
+
+        // Handle the overlapping bits
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[0] & 0x07) << 2) | ((randomness[1] & 0xC0) >>> 6)];
+        ulid[offset + index++] = ENCODING_CHARS[(randomness[1] & 0x3E) >>> 1];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[1] & 0x01) << 4) | ((randomness[2] & 0xF0) >>> 4)];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[2] & 0x0F) << 1) | ((randomness[3] & 0x80) >>> 7)];
+        ulid[offset + index++] = ENCODING_CHARS[(randomness[3] & 0x7C) >>> 2];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[3] & 0x03) << 3) | ((randomness[4] & 0xE0) >>> 5)];
+        ulid[offset + index++] = ENCODING_CHARS[randomness[4] & 0x1F];
+
+        ulid[offset + index++] = ENCODING_CHARS[(randomness[5] & 0xF8) >>> 3];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[5] & 0x07) << 2) | ((randomness[6] & 0xC0) >>> 6)];
+        ulid[offset + index++] = ENCODING_CHARS[(randomness[6] & 0x3E) >>> 1];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[6] & 0x01) << 4) | ((randomness[7] & 0xF0) >>> 4)];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[7] & 0x0F) << 1) | ((randomness[8] & 0x80) >>> 7)];
+        ulid[offset + index++] = ENCODING_CHARS[(randomness[8] & 0x7C) >>> 2];
+        ulid[offset + index++] = ENCODING_CHARS[((randomness[8] & 0x03) << 3) | ((randomness[9] & 0xE0) >>> 5)];
+        ulid[offset + index] = ENCODING_CHARS[randomness[9] & 0x1F];
     }
 
     /**
@@ -122,13 +176,13 @@ public class ULIDFactory {
     }
 
     /**
-     * Increment the random bytes for monotonic generation.
+     * Increment the randomness for the monotonic generation.
      *
      * @param bytes the bytes to increment
      */
     private void incrementRandomness(byte[] bytes) {
+        // Skip first 2 bytes as they contain the node ID
         for (int i = bytes.length - 1; i >= 2; i--) {
-            // Start from index 2 to preserve node ID in first two bytes
             if ((bytes[i] & 0xFF) == 0xFF) {
                 bytes[i] = 0;
             } else {
@@ -139,40 +193,72 @@ public class ULIDFactory {
     }
 
     /**
-     * Encode bytes using Crockford's base32.
+     * Extract the node ID from a ULID string.
      *
-     * @param bytes  the bytes to encode
-     * @param ulid   the char array to encode into
-     * @param offset the offset in the char array
+     * @param ulid The ULID string to extract the node ID from
+     * @return The node ID (0-1023)
+     * @throws IllegalArgumentException if the ULID string is invalid
      */
-    private void encodeBytes(byte[] bytes, char[] ulid, int offset) {
-        // First byte (8 bits) -> 2 characters (10 bits)
-        ulid[offset] = ENCODING_CHARS[(bytes[0] & 0xFF) >>> 3];
-        ulid[offset + 1] = ENCODING_CHARS[((bytes[0] & 0x07) << 2) | ((bytes[1] & 0xFF) >>> 6)];
+    public static int extractNodeId(String ulid) {
+        if (ulid == null) {
+            throw new IllegalArgumentException("ULID cannot be null");
+        }
 
-        // Second byte (6 remaining bits) + third byte (2 bits) -> 2 characters
-        ulid[offset + 2] = ENCODING_CHARS[((bytes[1] & 0x3F) >>> 1)];
-        ulid[offset + 3] = ENCODING_CHARS[((bytes[1] & 0x01) << 4) | ((bytes[2] & 0xFF) >>> 4)];
+        if (ulid.length() != 26) {
+            throw new IllegalArgumentException("Invalid ULID length: must be 26 characters");
+        }
 
-        // Continue with the pattern
-        ulid[offset + 4] = ENCODING_CHARS[((bytes[2] & 0x0F) << 1) | ((bytes[3] & 0xFF) >>> 7)];
-        ulid[offset + 5] = ENCODING_CHARS[((bytes[3] & 0x7F) >>> 2)];
-        ulid[offset + 6] = ENCODING_CHARS[((bytes[3] & 0x03) << 3) | ((bytes[4] & 0xFF) >>> 5)];
-        ulid[offset + 7] = ENCODING_CHARS[(bytes[4] & 0x1F)];
+        // Check if ULID contains only valid characters
+        if (!ulid.matches("[0-9A-HJKMNP-TV-Z]{26}")) {
+            throw new IllegalArgumentException("ULID contains invalid characters");
+        }
 
-        ulid[offset + 8] = ENCODING_CHARS[(bytes[5] & 0xFF) >>> 3];
-        ulid[offset + 9] = ENCODING_CHARS[((bytes[5] & 0x07) << 2) | ((bytes[6] & 0xFF) >>> 6)];
+        // Decode first two characters of the random part (after 10 timestamp chars)
+        char[] encodedRandom = ulid.substring(10, 12).toCharArray();
 
-        ulid[offset + 10] = ENCODING_CHARS[((bytes[6] & 0x3F) >>> 1)];
-        ulid[offset + 11] = ENCODING_CHARS[((bytes[6] & 0x01) << 4) | ((bytes[7] & 0xFF) >>> 4)];
+        // Convert the characters to their 5-bit values
+        int bits0 = decodeChar(encodedRandom[0]);  // First 5 bits
+        int bits1 = decodeChar(encodedRandom[1]);  // Next 5 bits
 
-        ulid[offset + 12] = ENCODING_CHARS[((bytes[7] & 0x0F) << 1) | ((bytes[8] & 0xFF) >>> 7)];
-        ulid[offset + 13] = ENCODING_CHARS[((bytes[8] & 0x7F) >>> 2)];
-        ulid[offset + 14] = ENCODING_CHARS[((bytes[8] & 0x03) << 3) | ((bytes[9] & 0xFF) >>> 5)];
-        ulid[offset + 15] = ENCODING_CHARS[(bytes[9] & 0x1F)];
+        // Convert these values back to the original byte representation
+        byte byte0 = (byte) ((bits0 << 3) | (bits1 >> 2));
+
+        // From byte0, we extract the high 2 bits of the node ID (bits 2-3)
+        int highBits = (byte0 >> 2) & 0x03;
+
+        // We need additional characters to get the low 8 bits
+        int bits2 = decodeChar(ulid.charAt(12));  // Next 5 bits
+        int bits3 = decodeChar(ulid.charAt(13));  // Next 5 bits
+
+        // byte1 is constructed from the last 3 bits of bits1 and first 5 bits of bits2
+        byte byte1 = (byte) (((bits1 & 0x03) << 6) | ((bits2 & 0x1F) << 1) | ((bits3 & 0x10) >> 4));
+
+        // Combine to get the full node ID
+        return (highBits << 8) | (byte1 & 0xFF);
     }
 
-    public int getNodeId() {
-        return nodeId;
+    /**
+     * Decodes a character from the Crockford Base32 encoding.
+     *
+     * @param c The character to decode
+     * @return The 5-bit value
+     * @throws IllegalArgumentException if the character is not valid
+     */
+    private static int decodeChar(char c) {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        } else if (c >= 'A' && c <= 'H') {
+            return c - 'A' + 10;
+        } else if (c >= 'J' && c <= 'K') {
+            return c - 'J' + 18;
+        } else if (c >= 'M' && c <= 'N') {
+            return c - 'M' + 20;
+        } else if (c >= 'P' && c <= 'T') {
+            return c - 'P' + 22;
+        } else if (c >= 'V' && c <= 'Z') {
+            return c - 'V' + 27;
+        } else {
+            throw new IllegalArgumentException("Invalid character in ULID: " + c);
+        }
     }
 }
