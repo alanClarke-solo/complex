@@ -5,21 +5,25 @@ import org.redisson.api.RTopic;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 @Component
-@RequiredArgsConstructor
 public class EventBus {
     private final Map<String, CopyOnWriteArrayList<Consumer<Map<String, Object>>>> subscribers =
             new ConcurrentHashMap<>();
 
     private final RedissonClient redissonClient;
     private final Map<String, Integer> listenerIds = new ConcurrentHashMap<>();
+
+    public EventBus(RedissonClient redissonClient) {
+        this.redissonClient = redissonClient;
+        init();
+    }
 
     @PostConstruct
     public void init() {
@@ -53,7 +57,7 @@ public class EventBus {
     }
 
     public void publish(String eventType, Map<String, Object> eventData) {
-        // Add an event type to the message
+        // Add event type to the message
         eventData.put("eventType", eventType);
 
         // Publish to Redis for distributed event handling

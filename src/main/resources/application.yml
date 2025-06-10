@@ -7,8 +7,8 @@ spring:
   
   datasource:
     url: jdbc:oracle:thin:@//localhost:1521/XEPDB1
-    username: solo_user
-    password: solo_zpal
+    username: wf_user
+    password: wf_pwd
     driver-class-name: oracle.jdbc.OracleDriver
     hikari:
       maximum-pool-size: 10
