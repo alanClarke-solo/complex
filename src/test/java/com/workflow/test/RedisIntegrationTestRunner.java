@@ -169,7 +169,7 @@ public class RedisIntegrationTestRunner {
                         if (lockAcquired) {
                             successCount.incrementAndGet();
                             logger.info("Client {} acquired lock", clientId);
-                            lockService.releaseLock(resourceId);
+                            lockService.releaseLock(resourceId, "client-" + clientId);
                         } else {
                             logger.info("Client {} failed to acquire lock", clientId);
                         }
@@ -181,7 +181,7 @@ public class RedisIntegrationTestRunner {
             
             // Release the initial lock after 2 seconds
             Thread.sleep(2000);
-            lockService.releaseLock(resourceId);
+            lockService.releaseLock(resourceId, "client-1");
             logger.info("Initial lock released");
             
             latch.await(10, TimeUnit.SECONDS);
