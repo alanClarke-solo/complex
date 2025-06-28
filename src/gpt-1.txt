@@ -1,0 +1,129 @@
+// Updated to include full flow with Spring Data JDBC repositories and improved domain mapping for complex workflow objects
+
+@SpringBootApplication
+@EnableScheduling
+@EnableTransactionManagement
+public class WorkflowManagerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(WorkflowManagerApplication.class, args);
+    }
+}
+
+// Domain classes
+@Data
+@Table("workflows")
+public class Workflow {
+    @Id
+    private String workflowId;
+    private String name;
+    private String description;
+    private boolean protectedParam;
+    private WorkflowStatus status;
+    private Instant startTime;
+    private Instant endTime;
+
+    @MappedCollection(idColumn = "workflow_id")
+    private List<Task> tasks = new ArrayList<>();
+
+    @Transient
+    private Schedule schedule;
+}
+
+@Data
+@Table("tasks")
+public class Task {
+    @Id
+    private String taskId;
+    private String workflowId; // Foreign key reference
+    private String name;
+    private String description;
+    private boolean mandatory;
+    private boolean forceExecute;
+    private boolean failEndsWorkflow;
+    private Instant startTime;
+    private Instant endTime;
+    private TaskStatus status;
+
+    @Column("input_params")
+    private Map<String, Object> input = new HashMap<>();
+
+    @Column("output_params")
+    private Map<String, Object> output = new HashMap<>();
+
+    @Column("preconditions")
+    private List<String> preconditions = new ArrayList<>();
+
+    @Column("next_tasks")
+    private List<String> nextTaskIds = new ArrayList<>();
+
+    @Transient
+    private Schedule schedule;
+}
+
+// Repositories
+public interface WorkflowRepository extends CrudRepository<Workflow, String> {
+    @Query("SELECT * FROM workflows WHERE name = :name")
+    Optional<Workflow> findByName(@Param("name") String name);
+
+    @Query("SELECT * FROM workflows")
+    List<Workflow> findAllWorkflows();
+}
+
+public interface TaskRepository extends CrudRepository<Task, String> {
+    @Query("SELECT * FROM tasks WHERE workflow_id = :workflowId")
+    List<Task> findByWorkflowId(@Param("workflowId") String workflowId);
+}
+
+// WorkflowService
+@Service
+@RequiredArgsConstructor
+public class WorkflowService {
+    private final WorkflowRepository workflowRepository;
+    private final TaskRepository taskRepository;
+    private final CacheManager cacheManager;
+
+    @Transactional
+    public List<Workflow> getAll() {
+        return workflowRepository.findAllWorkflows();
+    }
+
+    @Transactional
+    public Workflow getById(String workflowId) {
+        return workflowRepository.findById(workflowId).orElseThrow(() -> new IllegalArgumentException("Workflow not found"));
+    }
+
+    @Transactional
+    public void startWorkflow(String workflowId) {
+        Workflow workflow = getById(workflowId);
+        workflow.setStatus(WorkflowStatus.STARTING);
+        workflow.setStartTime(Instant.now());
+        workflowRepository.save(workflow);
+        // Trigger DAG executor async...
+    }
+
+    @Transactional
+    public void stopWorkflow(String workflowId, boolean immediate) {
+        Workflow workflow = getById(workflowId);
+        workflow.setStatus(immediate ? WorkflowStatus.FAILURE : WorkflowStatus.STOPPING);
+        workflowRepository.save(workflow);
+    }
+
+    @Transactional
+    public void restartWorkflow(String workflowId) {
+        Workflow workflow = getById(workflowId);
+        workflow.setStatus(WorkflowStatus.STARTING);
+        workflow.setStartTime(Instant.now());
+        workflow.setEndTime(null);
+        for (Task task : workflow.getTasks()) {
+            if (task.getStatus() == TaskStatus.FAILURE || task.getStatus() == TaskStatus.STOPPED) {
+                task.setStatus(TaskStatus.STARTING);
+                taskRepository.save(task);
+            }
+        }
+        workflowRepository.save(workflow);
+        // Trigger DAG executor async...
+    }
+}
+
+// These improvements make the system capable of reading/writing complex workflow structures using Spring Data JDBC,
+// with nested task collections and transactional operations for consistency.
